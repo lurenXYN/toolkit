@@ -91,4 +91,37 @@ def download_url(url: str, work_dir: Path, timeout: int = 60) -> Path:
     if written < 32:
         dest.unlink(missing_ok=True)
         raise RuntimeError(f"downloaded file too small ({written} bytes)")
+
+    # Some CDNs put .gif in the URL while the body is animated WebP.
+    sniffed = _sniff_suffix(dest)
+    if sniffed and dest.suffix.lower() != sniffed:
+        renamed = dest.with_suffix(sniffed)
+        dest.replace(renamed)
+        dest = renamed
     return dest
+
+
+def _sniff_suffix(path: Path) -> str | None:
+    """Guess image suffix from magic bytes.
+
+    Parameters:
+        path: Downloaded file.
+
+    Returns:
+        Suffix including the leading dot, or None when unknown.
+    """
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(16)
+    except OSError:
+        return None
+
+    if len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return ".webp"
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if header.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if header.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    return None

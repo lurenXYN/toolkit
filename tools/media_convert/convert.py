@@ -8,7 +8,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageSequence
 
 from tools.media_convert.inspect import MediaInfo, inspect_media, require_ffmpeg
 from tools.media_convert.sizeutil import format_size
@@ -88,6 +88,10 @@ def _convert_to_gif(
     ffmpeg = require_ffmpeg()
     scales = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3]
     fps_options = _fps_ladder(info)
+    # Ubuntu 22.04 ffmpeg 4.4 cannot decode animated WebP; use Pillow then.
+    use_pillow = info.is_animated and _looks_like_webp(input_path) and not _ffmpeg_supports_animated_webp(
+        ffmpeg, input_path
+    )
 
     attempt = 0
     last_error = ""
@@ -98,9 +102,12 @@ def _convert_to_gif(
             for fps in fps_options:
                 attempt += 1
                 candidate = tmp_dir / f"try_{attempt}.gif"
-                ok, err = _ffmpeg_webp_to_gif(ffmpeg, input_path, candidate, scale, fps)
+                if use_pillow:
+                    ok, err = _pillow_webp_to_gif(input_path, candidate, scale, fps)
+                else:
+                    ok, err = _encode_gif(ffmpeg, input_path, candidate, scale, fps)
                 if not ok:
-                    last_error = err
+                    last_error = _short_error(err)
                     _safe_unlink(candidate)
                     continue
 
@@ -170,6 +177,66 @@ def _fps_ladder(info: MediaInfo) -> list[float | None]:
     return values
 
 
+def _encode_gif(
+    ffmpeg: str,
+    input_path: Path,
+    output_path: Path,
+    scale: float,
+    fps: float | None,
+) -> tuple[bool, str]:
+    """Encode a GIF via ffmpeg, falling back to Pillow when needed.
+
+    Parameters:
+        ffmpeg: Path to ffmpeg.
+        input_path: Source file.
+        output_path: Destination GIF.
+        scale: Relative scale factor (1.0 = original).
+        fps: Optional FPS override.
+
+    Returns:
+        (ok, error_message) pair.
+    """
+    ok, err = _ffmpeg_webp_to_gif(ffmpeg, input_path, output_path, scale, fps)
+    if ok:
+        return True, ""
+
+    pillow_ok, pillow_err = _pillow_webp_to_gif(input_path, output_path, scale, fps)
+    if pillow_ok:
+        return True, ""
+    return False, _short_error(pillow_err or err)
+
+
+def _ffmpeg_supports_animated_webp(ffmpeg: str, sample_path: Path) -> bool:
+    """Probe whether ffmpeg can decode this animated WebP.
+
+    Parameters:
+        ffmpeg: Path to ffmpeg.
+        sample_path: Local WebP file.
+
+    Returns:
+        True when ffmpeg can decode at least one frame.
+    """
+    cmd = [
+        ffmpeg,
+        "-v",
+        "error",
+        "-f",
+        "webp",
+        "-i",
+        str(sample_path),
+        "-frames:v",
+        "1",
+        "-f",
+        "null",
+        "-",
+    ]
+    completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    err = ((completed.stderr or "") + (completed.stdout or "")).lower()
+    if "unsupported chunk: anim" in err or "unsupported chunk: anmf" in err:
+        return False
+    return completed.returncode == 0
+
+
 def _ffmpeg_webp_to_gif(
     ffmpeg: str,
     input_path: Path,
@@ -177,7 +244,7 @@ def _ffmpeg_webp_to_gif(
     scale: float,
     fps: float | None,
 ) -> tuple[bool, str]:
-    """Run ffmpeg palette-based WebP 鈫?GIF conversion.
+    """Run ffmpeg WebP/image → GIF conversion.
 
     Parameters:
         ffmpeg: Path to ffmpeg.
@@ -197,7 +264,6 @@ def _ffmpeg_webp_to_gif(
     if fps is not None:
         filters.append(f"fps={fps}")
 
-    # Two-pass palette pipeline yields smaller / cleaner GIFs than raw encode.
     vf = ",".join(filters)
     filter_complex = (
         f"[0:v]{vf},split[s0][s1];"
@@ -205,11 +271,15 @@ def _ffmpeg_webp_to_gif(
         f"[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle"
     )
 
+    # Force webp demuxer when content is webp but the temp suffix is wrong.
+    input_args = ["-i", str(input_path)]
+    if _looks_like_webp(input_path):
+        input_args = ["-f", "webp", "-i", str(input_path)]
+
     cmd = [
         ffmpeg,
         "-y",
-        "-i",
-        str(input_path),
+        *input_args,
         "-filter_complex",
         filter_complex,
         "-loop",
@@ -222,16 +292,13 @@ def _ffmpeg_webp_to_gif(
     if completed.returncode == 0 and output_path.is_file() and output_path.stat().st_size >= MIN_GIF_BYTES:
         return True, ""
 
-    # Fallback: single-pass GIF encode when palette pipeline fails on some WebP sources.
     _safe_unlink(output_path)
-    simple_vf = vf
     fallback_cmd = [
         ffmpeg,
         "-y",
-        "-i",
-        str(input_path),
+        *input_args,
         "-vf",
-        simple_vf,
+        vf,
         "-loop",
         "0",
         "-an",
@@ -246,6 +313,116 @@ def _ffmpeg_webp_to_gif(
         _safe_unlink(output_path)
         return False, fallback_err or err or "ffmpeg produced empty GIF"
     return True, ""
+
+
+def _pillow_webp_to_gif(
+    input_path: Path,
+    output_path: Path,
+    scale: float,
+    fps: float | None,
+) -> tuple[bool, str]:
+    """Convert animated/static WebP to GIF with Pillow (libwebp).
+
+    Parameters:
+        input_path: Source image.
+        output_path: Destination GIF.
+        scale: Relative scale factor.
+        fps: Optional FPS override.
+
+    Returns:
+        (ok, error_message) pair.
+    """
+    try:
+        with Image.open(input_path) as image:
+            frames: list[Image.Image] = []
+            durations: list[int] = []
+            for frame in ImageSequence.Iterator(image):
+                rgba = frame.convert("RGBA")
+                if scale != 1.0:
+                    width = max(1, int(rgba.width * scale))
+                    height = max(1, int(rgba.height * scale))
+                    rgba = rgba.resize((width, height), Image.Resampling.LANCZOS)
+
+                # Flatten onto white so GIF palette conversion stays stable.
+                canvas = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+                canvas.alpha_composite(rgba)
+                frames.append(
+                    canvas.convert("RGB").convert(
+                        "P", palette=Image.Palette.ADAPTIVE, colors=255
+                    )
+                )
+                durations.append(max(20, int(frame.info.get("duration", 100) or 100)))
+
+            if not frames:
+                return False, "Pillow found no frames in source image"
+
+            if fps is not None and fps > 0:
+                durations = [max(20, int(round(1000 / fps)))] * len(frames)
+
+            frames[0].save(
+                output_path,
+                format="GIF",
+                save_all=True,
+                append_images=frames[1:],
+                duration=durations,
+                loop=0,
+                optimize=False,
+            )
+    except Exception as exc:  # noqa: BLE001 - conversion boundary
+        _safe_unlink(output_path)
+        return False, str(exc)
+
+    if not output_path.is_file() or output_path.stat().st_size < MIN_GIF_BYTES:
+        _safe_unlink(output_path)
+        return False, "Pillow produced empty GIF"
+    return True, ""
+
+
+def _looks_like_webp(path: Path) -> bool:
+    """Detect WebP by magic bytes (RIFF....WEBP).
+
+    Parameters:
+        path: Local file path.
+
+    Returns:
+        True when the file content looks like WebP.
+    """
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(12)
+    except OSError:
+        return False
+    return len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP"
+
+
+def _short_error(message: str, limit: int = 280) -> str:
+    """Keep API errors readable instead of dumping full ffmpeg banners.
+
+    Parameters:
+        message: Raw error text.
+        limit: Maximum characters to keep.
+
+    Returns:
+        Trimmed error string focused on the last useful lines.
+    """
+    text = (message or "").strip()
+    if not text:
+        return "unknown encoder error"
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    useful = [
+        line
+        for line in lines
+        if not line.lower().startswith("ffmpeg version")
+        and "configuration:" not in line.lower()
+        and not line.startswith("--")
+        and not line.startswith("libav")
+        and not line.startswith("built with")
+    ]
+    picked = useful[-6:] if useful else lines[-6:]
+    compact = " | ".join(picked)
+    if len(compact) > limit:
+        return compact[-limit:]
+    return compact
 
 
 def _safe_unlink(path: Path) -> None:

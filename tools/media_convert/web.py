@@ -143,7 +143,10 @@ def create_router(output_dir: Path, page_html: Path) -> APIRouter:
         except HTTPException:
             raise
         except Exception as exc:  # noqa: BLE001 - API boundary
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            detail = str(exc)
+            if len(detail) > 400:
+                detail = detail[:400] + "…"
+            raise HTTPException(status_code=500, detail=detail) from exc
 
         run_output_cleanup()
         return payload
