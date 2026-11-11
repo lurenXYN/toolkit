@@ -40,8 +40,20 @@ chmod +x deploy/install-systemd.sh deploy/remote-update.sh deploy/bootstrap-vps.
 echo "==> install systemd service ($INSTALL_DIR :$PORT)"
 INSTALL_DIR="$INSTALL_DIR" HOST="$HOST" PORT="$PORT" ./deploy/install-systemd.sh
 
-echo "==> health"
-curl -fsS "http://127.0.0.1:${PORT}/api/health" || true
+echo "==> health (wait for uvicorn, up to ~60s)"
+HEALTH_OK=0
+for i in $(seq 1 30); do
+  if body="$(curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/api/health" 2>/dev/null)"; then
+    echo "$body"
+    HEALTH_OK=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$HEALTH_OK" != "1" ]]; then
+  echo "Warning: health check not ready yet; service may still be starting."
+  systemctl --no-pager --full status toolkit.service || true
+fi
 echo
 echo "Bootstrap done."
 echo "Portal:  http://127.0.0.1:${PORT}/"
