@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>media-convert · WebP → GIF</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg0: #10140f;
+      --bg1: #1a2218;
+      --ink: #e8f0e2;
+      --muted: #9aab90;
+      --line: #2d3a28;
+      --accent: #c8f06a;
+      --accent-ink: #14200a;
+      --danger: #ff8f7a;
+      --card: rgba(26, 34, 24, 0.92);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: "Space Grotesk", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #2a3d22 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #20301c 0%, transparent 50%),
+        linear-gradient(160deg, var(--bg0), #0c100b 60%, #151c13);
+    }
+
+    .wrap {
+      width: min(720px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 3.5rem 0 4rem;
+    }
+
+    .brand {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.85rem;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      margin-bottom: 0.75rem;
+    }
+
+    h1 {
+      margin: 0 0 0.5rem;
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+      line-height: 1.1;
+      font-weight: 700;
+    }
+
+    .lead {
+      margin: 0 0 2rem;
+      color: var(--muted);
+      max-width: 36rem;
+      line-height: 1.5;
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 1.25rem;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    }
+
+    .tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .tab {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 0.65rem 0.9rem;
+      cursor: pointer;
+      font: inherit;
+    }
+    .tab.active {
+      background: var(--accent);
+      color: var(--accent-ink);
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin: 0.85rem 0 0.4rem;
+    }
+
+    input[type="text"],
+    input[type="url"],
+    select {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #0f150e;
+      color: var(--ink);
+      border-radius: 12px;
+      padding: 0.8rem 0.95rem;
+      font: inherit;
+      outline: none;
+    }
+    input:focus, select:focus { border-color: var(--accent); }
+
+    .drop {
+      border: 1.5px dashed var(--line);
+      border-radius: 14px;
+      padding: 1.4rem 1rem;
+      text-align: center;
+      color: var(--muted);
+      background: rgba(15, 21, 14, 0.7);
+      transition: border-color 0.15s ease, background 0.15s ease;
+      cursor: pointer;
+    }
+    .drop.dragover {
+      border-color: var(--accent);
+      background: rgba(200, 240, 106, 0.08);
+    }
+    .drop strong { color: var(--ink); display: block; margin-bottom: 0.25rem; }
+    .drop input { display: none; }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.85rem;
+    }
+
+    .actions {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1.25rem;
+      flex-wrap: wrap;
+    }
+
+    button.primary {
+      border: 0;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font: inherit;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 0.85rem 1.35rem;
+      cursor: pointer;
+    }
+    button.primary:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .hint {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.75rem;
+      color: var(--muted);
+      align-self: center;
+    }
+
+    .result {
+      margin-top: 1rem;
+      border-top: 1px solid var(--line);
+      padding-top: 1rem;
+      display: none;
+    }
+    .result.show { display: block; }
+    .result.error { color: var(--danger); }
+    .meta {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.6;
+      margin: 0.5rem 0 0.9rem;
+    }
+    .preview {
+      max-width: 100%;
+      max-height: 280px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #000;
+      display: block;
+    }
+    a.download {
+      display: inline-block;
+      margin-top: 0.85rem;
+      color: var(--accent-ink);
+      background: var(--accent);
+      text-decoration: none;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 0.7rem 1.15rem;
+    }
+
+    @media (max-width: 560px) {
+      .row { grid-template-columns: 1fr; }
+      .wrap { padding-top: 2rem; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="brand"><a href="/" style="color:inherit;text-decoration:none">TOOLKIT</a> / MEDIA-CONVERT</div>
+    <h1>动图 WebP 转 GIF</h1>
+    <p class="lead">上传本地文件或贴网络链接，可限制输出体积（例如不超过 5MB）。静图也可导出 PNG / JPG。</p>
+
+    <section class="panel">
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab active" data-mode="file" id="tab-file">上传文件</button>
+        <button type="button" class="tab" data-mode="url" id="tab-url">网络链接</button>
+      </div>
+
+      <div id="file-pane">
+        <div class="drop" id="drop">
+          <strong id="file-label">拖拽 WebP 到此处，或点击选择</strong>
+          <span>支持动图 / 静图 WebP</span>
+          <input type="file" id="file" accept=".webp,image/webp,image/*" />
+        </div>
+      </div>
+
+      <div id="url-pane" hidden>
+        <label for="url">图片链接</label>
+        <input id="url" type="url" placeholder="https://example.com/anim.webp" />
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="fmt">输出格式</label>
+          <select id="fmt">
+            <option value="gif" selected>GIF（动图首选）</option>
+            <option value="png">PNG</option>
+            <option value="jpg">JPG</option>
+          </select>
+        </div>
+        <div>
+          <label for="max-size">体积上限（可留空）</label>
+          <input id="max-size" type="text" value="5m" placeholder="例如 5m / 512kb" />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="primary" id="convert" type="button">开始转换</button>
+        <span class="hint" id="status">就绪</span>
+      </div>
+
+      <div class="result" id="result">
+        <div id="result-text"></div>
+        <div class="meta" id="result-meta"></div>
+        <img class="preview" id="preview" alt="转换预览" hidden />
+        <a class="download" id="download" href="#" download>下载结果</a>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const tabFile = document.getElementById("tab-file");
+    const tabUrl = document.getElementById("tab-url");
+    const filePane = document.getElementById("file-pane");
+    const urlPane = document.getElementById("url-pane");
+    const drop = document.getElementById("drop");
+    const fileInput = document.getElementById("file");
+    const fileLabel = document.getElementById("file-label");
+    const convertBtn = document.getElementById("convert");
+    const statusEl = document.getElementById("status");
+    const resultEl = document.getElementById("result");
+    const resultText = document.getElementById("result-text");
+    const resultMeta = document.getElementById("result-meta");
+    const preview = document.getElementById("preview");
+    const download = document.getElementById("download");
+
+    let mode = "file";
+    let selectedFile = null;
+
+    function setMode(next) {
+      mode = next;
+      tabFile.classList.toggle("active", mode === "file");
+      tabUrl.classList.toggle("active", mode === "url");
+      filePane.hidden = mode !== "file";
+      urlPane.hidden = mode !== "url";
+    }
+
+    tabFile.addEventListener("click", () => setMode("file"));
+    tabUrl.addEventListener("click", () => setMode("url"));
+
+    drop.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", () => {
+      selectedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+      fileLabel.textContent = selectedFile ? selectedFile.name : "拖拽 WebP 到此处，或点击选择";
+    });
+
+    ["dragenter", "dragover"].forEach((evt) => {
+      drop.addEventListener(evt, (e) => {
+        e.preventDefault();
+        drop.classList.add("dragover");
+      });
+    });
+    ["dragleave", "drop"].forEach((evt) => {
+      drop.addEventListener(evt, (e) => {
+        e.preventDefault();
+        drop.classList.remove("dragover");
+      });
+    });
+    drop.addEventListener("drop", (e) => {
+      const file = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!file) return;
+      selectedFile = file;
+      fileLabel.textContent = file.name;
+    });
+
+    convertBtn.addEventListener("click", async () => {
+      resultEl.classList.remove("show", "error");
+      preview.hidden = true;
+      convertBtn.disabled = true;
+      statusEl.textContent = "转换中…";
+
+      const body = new FormData();
+      body.append("fmt", document.getElementById("fmt").value);
+      body.append("max_size", document.getElementById("max-size").value.trim());
+
+      if (mode === "file") {
+        if (!selectedFile) {
+          showError("请先选择 WebP 文件");
+          return;
+        }
+        body.append("file", selectedFile);
+      } else {
+        const url = document.getElementById("url").value.trim();
+        if (!url) {
+          showError("请填写网络链接");
+          return;
+        }
+        body.append("url", url);
+      }
+
+      try {
+        const resp = await fetch("./api/convert", { method: "POST", body });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          throw new Error(data.detail || "转换失败");
+        }
+        showSuccess(data);
+      } catch (err) {
+        showError(err.message || String(err));
+      }
+    });
+
+    function showError(message) {
+      convertBtn.disabled = false;
+      statusEl.textContent = "失败";
+      resultEl.classList.add("show", "error");
+      resultText.textContent = message;
+      resultMeta.textContent = "";
+      download.style.display = "none";
+    }
+
+    function showSuccess(data) {
+      convertBtn.disabled = false;
+      statusEl.textContent = "完成";
+      resultEl.classList.add("show");
+      resultEl.classList.remove("error");
+      resultText.textContent = `已生成 ${data.filename}（${data.bytes_label}）`;
+      const src = data.source || {};
+      resultMeta.textContent = [
+        `源图 ${src.width}×${src.height}`,
+        `帧数 ${src.frames}`,
+        `动图 ${src.animated ? "是" : "否"}`,
+        `尝试 ${data.attempts} 次`,
+        `缩放 ${data.scale}`,
+        data.fps != null ? `fps ${data.fps}` : null,
+      ].filter(Boolean).join(" · ");
+      download.href = data.download_url;
+      download.download = data.filename;
+      download.style.display = "inline-block";
+      preview.hidden = false;
+      preview.src = data.download_url + "?t=" + Date.now();
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>toolkit · 小工具聚合</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg0: #0e1218;
+      --ink: #e7eef8;
+      --muted: #8fa0b5;
+      --line: #243041;
+      --accent: #5ee0a8;
+      --accent-ink: #062417;
+      --card: rgba(18, 26, 36, 0.92);
+      --soon: #6b7c90;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: "Space Grotesk", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(900px 500px at 0% 0%, #1a2a3d 0%, transparent 55%),
+        radial-gradient(700px 400px at 100% 10%, #12352c 0%, transparent 50%),
+        linear-gradient(165deg, var(--bg0), #0a0e14 70%);
+    }
+    .wrap {
+      width: min(920px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 3.25rem 0 4rem;
+    }
+    .brand {
+      font-family: "IBM Plex Mono", monospace;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      font-size: 0.85rem;
+      margin-bottom: 0.7rem;
+    }
+    h1 {
+      margin: 0 0 0.55rem;
+      font-size: clamp(2rem, 5vw, 3rem);
+      line-height: 1.05;
+    }
+    .lead {
+      margin: 0 0 2rem;
+      color: var(--muted);
+      max-width: 38rem;
+      line-height: 1.55;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+    .card {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 1.2rem 1.2rem 1.3rem;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+      min-height: 150px;
+    }
+    .card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .card.soon {
+      opacity: 0.65;
+      pointer-events: none;
+    }
+    .card .tag {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.72rem;
+      color: var(--accent);
+      margin-bottom: 0.55rem;
+    }
+    .card.soon .tag { color: var(--soon); }
+    .card h2 {
+      margin: 0 0 0.45rem;
+      font-size: 1.25rem;
+    }
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.45;
+      font-size: 0.95rem;
+    }
+    .foot {
+      margin-top: 2rem;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="brand">TOOLKIT</div>
+    <h1>小工具聚合台</h1>
+    <p class="lead">把常用小工具放在一起。第一个是动图 WebP 转 GIF；后面继续往里加。</p>
+    <section class="grid" id="grid" aria-label="工具列表"></section>
+    <p class="foot" id="meta">loading…</p>
+  </main>
+  <script>
+    async function boot() {
+      const grid = document.getElementById("grid");
+      const meta = document.getElementById("meta");
+      try {
+        const resp = await fetch("/api/tools");
+        const data = await resp.json();
+        grid.innerHTML = "";
+        for (const tool of data.tools || []) {
+          const a = document.createElement(tool.status === "ready" ? "a" : "div");
+          a.className = "card" + (tool.status === "soon" ? " soon" : "");
+          if (tool.status === "ready") a.href = tool.href;
+          a.innerHTML = `
+            <div class="tag">${tool.status === "ready" ? "READY" : "SOON"}</div>
+            <h2>${tool.name}</h2>
+            <p>${tool.summary}</p>
+          `;
+          grid.appendChild(a);
+        }
+        meta.textContent = `${(data.tools || []).length} tools · /api/health`;
+      } catch (err) {
+        meta.textContent = "加载失败: " + err;
+      }
+    }
+    boot();
+  </script>
+</body>
+</html>

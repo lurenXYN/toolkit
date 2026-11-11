@@ -1,0 +1,18 @@
+# toolkit 发布与多环境同步规范
+
+## 真相源
+
+- **唯一远端**：GitHub `https://github.com/lurenXYN/toolkit.git`
+- **推送 `main` = 立即部署 VPS**（`.github/workflows/deploy.yml`）
+
+## 主力机流程（go-learning → 独立仓）
+
+0. 独立仓先 `git fetch`；若 `origin/main` 领先，先 `pull` 再反向复制回 `go-learning/apps/toolkit`
+1. 在 `apps/toolkit` 开发验证
+2. robocopy 同步到 `D:\Source\Repos\toolkit`（排除 `.venv` `__pycache__` `data` `.git` `.pytest_cache`）
+3. 独立仓 commit → `git push origin main`
+
+## 硬纪律
+
+- `go-learning` 严禁 `git push`
+- 不提交 `data/`、`.venv`、`__pycache__`

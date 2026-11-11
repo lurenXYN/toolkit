@@ -1,0 +1,22 @@
+[Unit]
+Description=toolkit small-tools portal (FastAPI / uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=REPLACE_USER
+Group=REPLACE_USER
+WorkingDirectory=/opt/toolkit
+Environment=PYTHONUNBUFFERED=1
+Environment=TOOLKIT_HOST=0.0.0.0
+Environment=TOOLKIT_PORT=8780
+ExecStart=/opt/toolkit/.venv/bin/uvicorn toolkit.app:app --host 0.0.0.0 --port 8780 --log-level info
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
