@@ -65,11 +65,30 @@ def download_url(url: str, work_dir: Path, timeout: int = 60) -> Path:
     os.close(fd)
     dest = Path(raw_path)
 
-    response = requests.get(url, stream=True, timeout=timeout)
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "image/webp,image/*,*/*;q=0.8",
+    }
+    response = requests.get(url, stream=True, timeout=timeout, headers=headers)
     response.raise_for_status()
 
+    content_type = (response.headers.get("Content-Type") or "").lower()
+    if "text/html" in content_type:
+        dest.unlink(missing_ok=True)
+        raise RuntimeError("URL returned HTML instead of an image (link may have expired)")
+
+    written = 0
     with dest.open("wb") as handle:
         for chunk in response.iter_content(chunk_size=1024 * 256):
             if chunk:
                 handle.write(chunk)
+                written += len(chunk)
+
+    if written < 32:
+        dest.unlink(missing_ok=True)
+        raise RuntimeError(f"downloaded file too small ({written} bytes)")
     return dest

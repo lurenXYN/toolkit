@@ -15,6 +15,8 @@ from tools.media_convert.sizeutil import format_size
 
 
 SUPPORTED_OUTPUTS = {"gif", "png", "jpg", "jpeg"}
+# Reject empty / truncated ffmpeg leftovers that can appear after failed encodes.
+MIN_GIF_BYTES = 32
 
 
 @dataclass
@@ -89,6 +91,7 @@ def _convert_to_gif(
 
     attempt = 0
     last_error = ""
+    valid: list[tuple[Path, int, float, float | None]] = []
     with tempfile.TemporaryDirectory(prefix="media-convert-gif-", ignore_cleanup_errors=True) as tmp:
         tmp_dir = Path(tmp)
         for scale in scales:
@@ -98,9 +101,16 @@ def _convert_to_gif(
                 ok, err = _ffmpeg_webp_to_gif(ffmpeg, input_path, candidate, scale, fps)
                 if not ok:
                     last_error = err
+                    _safe_unlink(candidate)
                     continue
 
                 size = candidate.stat().st_size
+                if size < MIN_GIF_BYTES:
+                    last_error = f"ffmpeg produced empty/invalid GIF ({size} bytes)"
+                    _safe_unlink(candidate)
+                    continue
+
+                valid.append((candidate, size, scale, fps))
                 if max_bytes is None or size <= max_bytes:
                     shutil.copyfile(candidate, output_path)
                     return ConvertResult(
@@ -112,25 +122,24 @@ def _convert_to_gif(
                         info=info,
                     )
 
-        # Last resort: keep the smallest candidate produced.
-        candidates = sorted(tmp_dir.glob("try_*.gif"), key=lambda p: p.stat().st_size)
-        if not candidates:
+        if not valid:
             raise RuntimeError(f"ffmpeg failed to produce GIF: {last_error or 'unknown error'}")
 
-        best = candidates[0]
-        shutil.copyfile(best, output_path)
-        size = best.stat().st_size
+        # Prefer the smallest *valid* oversized candidate when nothing fit the budget.
+        best_path, size, scale, fps = min(valid, key=lambda item: item[1])
         if max_bytes is not None and size > max_bytes:
             raise RuntimeError(
                 f"unable to fit GIF under {format_size(max_bytes)}; "
                 f"smallest result is {format_size(size)} after {attempt} attempts"
             )
+
+        shutil.copyfile(best_path, output_path)
         return ConvertResult(
             output=output_path,
             bytes=size,
             attempts=attempt,
-            scale=scales[-1],
-            fps=fps_options[-1],
+            scale=scale,
+            fps=fps,
             info=info,
         )
 
@@ -180,8 +189,10 @@ def _ffmpeg_webp_to_gif(
     Returns:
         (ok, stderr) pair.
     """
-    # Even width/height keep palette filters happy on odd dimensions.
-    scale_expr = f"scale=trunc(iw*{scale}/2)*2:trunc(ih*{scale}/2)*2:flags=lanczos"
+    # Even width/height keep palette filters happy on odd dimensions; never go below 2px.
+    scale_expr = (
+        f"scale=max(2\\,trunc(iw*{scale}/2)*2):max(2\\,trunc(ih*{scale}/2)*2):flags=lanczos"
+    )
     filters = [scale_expr]
     if fps is not None:
         filters.append(f"fps={fps}")
@@ -207,9 +218,46 @@ def _ffmpeg_webp_to_gif(
         str(output_path),
     ]
     completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if completed.returncode != 0 or not output_path.is_file():
-        return False, (completed.stderr or completed.stdout or "").strip()
+    err = (completed.stderr or completed.stdout or "").strip()
+    if completed.returncode == 0 and output_path.is_file() and output_path.stat().st_size >= MIN_GIF_BYTES:
+        return True, ""
+
+    # Fallback: single-pass GIF encode when palette pipeline fails on some WebP sources.
+    _safe_unlink(output_path)
+    simple_vf = vf
+    fallback_cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(input_path),
+        "-vf",
+        simple_vf,
+        "-loop",
+        "0",
+        "-an",
+        str(output_path),
+    ]
+    fallback = subprocess.run(fallback_cmd, capture_output=True, text=True, check=False)
+    fallback_err = (fallback.stderr or fallback.stdout or "").strip()
+    if fallback.returncode != 0 or not output_path.is_file():
+        _safe_unlink(output_path)
+        return False, fallback_err or err
+    if output_path.stat().st_size < MIN_GIF_BYTES:
+        _safe_unlink(output_path)
+        return False, fallback_err or err or "ffmpeg produced empty GIF"
     return True, ""
+
+
+def _safe_unlink(path: Path) -> None:
+    """Delete a temp file if present, ignoring lock/race errors.
+
+    Parameters:
+        path: File to remove.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _convert_static(

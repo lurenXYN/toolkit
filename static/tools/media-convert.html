@@ -361,6 +361,10 @@
 
     function showSuccess(data) {
       convertBtn.disabled = false;
+      if (!data.bytes || data.bytes < 32) {
+        showError("转换结果无效（文件为空），请换一张图或稍后再试");
+        return;
+      }
       statusEl.textContent = "完成";
       resultEl.classList.add("show");
       resultEl.classList.remove("error");
