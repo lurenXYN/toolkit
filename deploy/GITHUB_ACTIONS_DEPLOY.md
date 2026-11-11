@@ -95,8 +95,19 @@ Secrets 配好后，在 Actions 页对 **Deploy** 点 **Re-run**，或随便推�
 
 ## C. 注意
 
-- 服务器需有 **ffmpeg**；Ubuntu 22.04 自带 4.4 **不能解码动图 WebP**，应用会自动回退到 Pillow/libwebp
-- 若仍想用新版 ffmpeg，可另装静态包（可选，非必须）
+- 推荐用 `deploy/install-ffmpeg.sh` 安装新版静态 ffmpeg 到 `/opt/ffmpeg`（并链接到 `/usr/local/bin`），以支持动图 WebP
+- Ubuntu 自带 4.4 不能解码 `ANIM/ANMF`；未升级时应用仍会回退 Pillow
 - `data/` 不会被 rsync 覆盖（输出缓存保留）
 - 公网建议 Nginx + HTTPS，勿长期裸奔 `0.0.0.0:8780`
 - 私钥只放 GitHub Secrets，不要提交进仓库
+
+### 单独升级 VPS ffmpeg
+
+```bash
+cd ~/github/toolkit
+git pull origin main
+chmod +x deploy/install-ffmpeg.sh
+sudo ./deploy/install-ffmpeg.sh
+sudo systemctl restart toolkit
+ffmpeg -version | head -n 2
+```

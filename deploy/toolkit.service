@@ -11,6 +11,8 @@ WorkingDirectory=/opt/toolkit
 Environment=PYTHONUNBUFFERED=1
 Environment=TOOLKIT_HOST=0.0.0.0
 Environment=TOOLKIT_PORT=8780
+# Prefer /usr/local/bin so modern static ffmpeg (ANIM WebP) wins over apt 4.4.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
 ExecStart=/opt/toolkit/.venv/bin/uvicorn toolkit.app:app --host 0.0.0.0 --port 8780 --log-level info
 Restart=always
 RestartSec=5

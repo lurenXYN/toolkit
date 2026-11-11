@@ -35,7 +35,10 @@ else
   cd "$REPO_DIR"
 fi
 
-chmod +x deploy/install-systemd.sh deploy/remote-update.sh deploy/bootstrap-vps.sh
+chmod +x deploy/*.sh
+
+echo "==> install modern static ffmpeg (animated WebP)"
+./deploy/install-ffmpeg.sh
 
 echo "==> install systemd service ($INSTALL_DIR :$PORT)"
 INSTALL_DIR="$INSTALL_DIR" HOST="$HOST" PORT="$PORT" ./deploy/install-systemd.sh
